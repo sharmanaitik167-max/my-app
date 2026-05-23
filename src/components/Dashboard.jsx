@@ -1,11 +1,10 @@
 import { useState, useMemo } from 'react';
-import { Search, CalendarDays, FileDown, Share2 } from 'lucide-react';
+import { Search, CalendarDays, FileDown, Share2, PlusCircle } from 'lucide-react';
 import { isToday, isThisWeek } from 'date-fns';
 import BillingSummary from './BillingSummary';
 import CustomerList from './CustomerList';
 import { generateBillText, sendWhatsApp, downloadPdfBill } from '../utils/billUtils';
 
-// WhatsApp green icon (reused from CustomerList)
 function WhatsAppIcon({ size = 16 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
@@ -17,206 +16,120 @@ function WhatsAppIcon({ size = 16 }) {
 const FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'today', label: 'Today' },
-  { key: 'week', label: 'This Week' }
+  { key: 'week', label: 'This Week' },
+  { key: 'paid', label: 'Paid' },
+  { key: 'dues', label: 'Dues' }
 ];
 
-export default function Dashboard({ customers, onEdit, onDelete, onNotify }) {
+export default function Dashboard({ customers, stock, onEdit, onDelete, onNotify, onToggleStatus, onGoToStock, onGoToReport, onViewProfile }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDate, setFilterDate] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
 
   const filteredCustomers = useMemo(() => {
     return customers.filter(customer => {
-      const matchesSearch =
+      const matchesSearch = !searchTerm ||
         customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (customer.phone && customer.phone.includes(searchTerm));
+        (customer.phone && customer.phone.includes(searchTerm)) ||
+        (customer.product && customer.product.toLowerCase().includes(searchTerm.toLowerCase()));
 
-      const matchesDate = filterDate
-        ? customer.date.startsWith(filterDate)
-        : true;
+      const matchesDate = filterDate ? customer.date.startsWith(filterDate) : true;
 
       let matchesQuickFilter = true;
-      if (activeFilter === 'today') {
-        matchesQuickFilter = isToday(new Date(customer.date));
-      } else if (activeFilter === 'week') {
-        matchesQuickFilter = isThisWeek(new Date(customer.date), { weekStartsOn: 1 });
-      }
+      if (activeFilter === 'today') matchesQuickFilter = isToday(new Date(customer.date));
+      else if (activeFilter === 'week') matchesQuickFilter = isThisWeek(new Date(customer.date), { weekStartsOn: 1 });
+      else if (activeFilter === 'dues') matchesQuickFilter = customer.status === 'due';
+      else if (activeFilter === 'paid') matchesQuickFilter = (customer.status || 'paid') !== 'due';
 
       return matchesSearch && matchesDate && matchesQuickFilter;
     });
   }, [customers, searchTerm, filterDate, activeFilter]);
 
-  // --- Bulk actions for filtered records ---
   const handleBulkPdf = () => {
-    if (filteredCustomers.length === 0) {
-      onNotify('No records to generate PDF', 'error');
-      return;
-    }
-    // Generate PDF for the most recent entry in filtered list
+    if (filteredCustomers.length === 0) { onNotify('No records', 'error'); return; }
     downloadPdfBill(filteredCustomers[0]);
-    onNotify(`PDF invoice opened for ${filteredCustomers[0].name}`, 'success');
+    onNotify(`PDF for ${filteredCustomers[0].name}`, 'success');
   };
 
   const handleBulkWhatsApp = () => {
-    if (filteredCustomers.length === 0) {
-      onNotify('No records to send', 'error');
-      return;
-    }
-    const latest = filteredCustomers[0];
-    const result = sendWhatsApp(latest);
-    if (!result.success) {
-      onNotify(result.error, 'error');
-    } else {
-      onNotify(`Bill sent to ${latest.name} via WhatsApp`, 'success');
-    }
+    if (filteredCustomers.length === 0) { onNotify('No records', 'error'); return; }
+    const result = sendWhatsApp(filteredCustomers[0]);
+    if (!result.success) onNotify(result.error, 'error');
+    else onNotify(`Bill sent via WhatsApp`, 'success');
   };
 
   const handleShare = async () => {
-    if (filteredCustomers.length === 0) {
-      onNotify('No records to share', 'error');
-      return;
-    }
-
-    const latest = filteredCustomers[0];
-    const text = generateBillText(latest);
-
+    if (filteredCustomers.length === 0) { onNotify('No records', 'error'); return; }
+    const text = generateBillText(filteredCustomers[0]);
     if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `Invoice - ${latest.name} | NatvarNand`,
-          text: text
-        });
-        onNotify('Shared successfully!', 'success');
-      } catch (err) {
-        if (err.name !== 'AbortError') {
-          onNotify('Share cancelled', 'error');
-        }
-      }
+      try { await navigator.share({ title: `Invoice | NatvarNand`, text }); onNotify('Shared!', 'success'); }
+      catch (err) { if (err.name !== 'AbortError') onNotify('Share cancelled', 'error'); }
     } else {
-      // Fallback: copy to clipboard
-      try {
-        await navigator.clipboard.writeText(text);
-        onNotify('Bill copied to clipboard! Paste it anywhere to share.', 'success');
-      } catch {
-        onNotify('Sharing not supported on this browser', 'error');
-      }
+      try { await navigator.clipboard.writeText(text); onNotify('Copied to clipboard!', 'success'); }
+      catch { onNotify('Not supported', 'error'); }
     }
   };
 
   return (
     <div className="mt-8 animate-fade-in-up">
-      <div className="flex items-center gap-2 mb-6">
-        <div className="w-1.5 h-6 bg-orange-500 rounded-full"></div>
-        <h2 className="text-xl font-bold text-gray-800">Business Dashboard</h2>
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-6 bg-orange-500 rounded-full"></div>
+          <h2 className="text-xl font-bold text-gray-800">Business Dashboard</h2>
+        </div>
+        <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold py-2.5 px-4 rounded-xl transition-all shadow-sm text-sm">
+          <PlusCircle size={16} /> New Sale
+        </button>
       </div>
 
-      <BillingSummary customers={customers} />
+      <BillingSummary customers={customers} stock={stock} onGoToStock={onGoToStock} onGoToReport={onGoToReport} />
 
-      {/* Records Section */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        {/* Toolbar */}
         <div className="p-5 border-b border-gray-100">
           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
-            {/* Left: Search + Filters */}
             <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto flex-1">
-              {/* Search */}
               <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search name or phone..."
-                  value={searchTerm}
+                <input type="text" placeholder="Search name, phone, or product..." value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none text-sm bg-gray-50 hover:bg-white transition-colors"
-                />
+                  className="pl-10 w-full p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none text-sm bg-gray-50 hover:bg-white transition-colors" />
               </div>
-
-              {/* Quick Filters */}
-              <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+              <div className="flex gap-1 bg-gray-100 p-1 rounded-xl overflow-x-auto">
                 {FILTERS.map(f => (
-                  <button
-                    key={f.key}
-                    onClick={() => { setActiveFilter(f.key); setFilterDate(''); }}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                      activeFilter === f.key
-                        ? 'filter-btn-active'
-                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
-                    {f.label}
-                  </button>
+                  <button key={f.key} onClick={() => { setActiveFilter(f.key); setFilterDate(''); }}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                      activeFilter === f.key ? 'filter-btn-active' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    }`}>{f.label}</button>
                 ))}
               </div>
-
-              {/* Date Picker */}
               <div className="relative">
                 <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <input
-                  type="date"
-                  value={filterDate}
+                <input type="date" value={filterDate}
                   onChange={(e) => { setFilterDate(e.target.value); setActiveFilter('all'); }}
-                  className="pl-10 p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none text-sm bg-gray-50 hover:bg-white transition-colors w-full sm:w-auto"
-                  title="Filter by specific date"
-                />
+                  className="pl-10 p-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-orange-400 outline-none text-sm bg-gray-50 hover:bg-white transition-colors w-full sm:w-auto" />
               </div>
-
               {filterDate && (
-                <button
-                  onClick={() => setFilterDate('')}
-                  className="text-xs text-orange-600 hover:text-orange-800 font-medium self-center underline"
-                >
-                  Clear
-                </button>
+                <button onClick={() => setFilterDate('')} className="text-xs text-orange-600 hover:text-orange-800 font-medium self-center underline">Clear</button>
               )}
             </div>
-
-            {/* Right: Action Buttons */}
             <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end flex-wrap">
-              <span className="text-sm text-gray-400 mr-1">
-                {filteredCustomers.length} record{filteredCustomers.length !== 1 ? 's' : ''}
-              </span>
-
-              {/* Download PDF */}
-              <button
-                onClick={handleBulkPdf}
-                className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-900 text-white px-3.5 py-2 rounded-xl font-medium transition-all text-sm shadow-sm hover:shadow-md"
-                title="Download PDF invoice for latest entry"
-              >
-                <FileDown size={15} />
-                <span className="hidden sm:inline">Download PDF</span>
+              <span className="text-sm text-gray-400 mr-1">{filteredCustomers.length} record{filteredCustomers.length !== 1 ? 's' : ''}</span>
+              <button onClick={handleBulkPdf} className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-900 text-white px-3.5 py-2 rounded-xl font-medium text-sm shadow-sm" title="PDF">
+                <FileDown size={15} /><span className="hidden sm:inline">PDF</span>
               </button>
-
-              {/* Send WhatsApp */}
-              <button
-                onClick={handleBulkWhatsApp}
-                className="flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white px-3.5 py-2 rounded-xl font-medium transition-all text-sm shadow-sm hover:shadow-md"
-                title="Send bill via WhatsApp for latest entry"
-              >
-                <WhatsAppIcon size={15} />
-                <span className="hidden sm:inline">Send WhatsApp</span>
+              <button onClick={handleBulkWhatsApp} className="flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white px-3.5 py-2 rounded-xl font-medium text-sm shadow-sm" title="WhatsApp">
+                <WhatsAppIcon size={15} /><span className="hidden sm:inline">WhatsApp</span>
               </button>
-
-              {/* Share */}
-              <button
-                onClick={handleShare}
-                className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white px-3.5 py-2 rounded-xl font-medium transition-all text-sm shadow-sm hover:shadow-md"
-                title="Share via WhatsApp, Telegram, etc."
-              >
-                <Share2 size={15} />
-                <span className="hidden sm:inline">Share</span>
+              <button onClick={handleShare} className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-700 text-white px-3.5 py-2 rounded-xl font-medium text-sm shadow-sm" title="Share">
+                <Share2 size={15} /><span className="hidden sm:inline">Share</span>
               </button>
             </div>
           </div>
         </div>
-
-        {/* Customer List */}
         <div className="p-5 pt-0 mt-3">
-          <CustomerList
-            customers={filteredCustomers}
-            onEdit={onEdit}
-            onDelete={onDelete}
-            onNotify={onNotify}
-          />
+          <CustomerList customers={filteredCustomers} onEdit={onEdit} onDelete={onDelete} onNotify={onNotify}
+            onToggleStatus={onToggleStatus} onViewProfile={onViewProfile} />
         </div>
       </div>
     </div>

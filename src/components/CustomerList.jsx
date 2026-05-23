@@ -1,6 +1,8 @@
+import { useMemo, useState } from 'react';
 import { format } from 'date-fns';
-import { Edit2, Trash2, Phone, Package, FileDown, Share2 } from 'lucide-react';
+import { Edit2, Trash2, Phone, Package, FileDown, Share2, ChevronDown, ChevronUp, User } from 'lucide-react';
 import { sendWhatsApp, downloadPdfBill, shareViaNativeShare } from '../utils/billUtils';
+import { groupCustomerEntries, normalizeEntry } from '../services/customerService';
 
 // WhatsApp green SVG icon
 function WhatsAppIcon({ size = 16 }) {
@@ -11,31 +13,44 @@ function WhatsAppIcon({ size = 16 }) {
   );
 }
 
-export default function CustomerList({ customers, onEdit, onDelete, onNotify }) {
-  const formatCurrency = (amount) =>
-    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount);
+function StatusBadge({ status }) {
+  const isPaid = (status || 'paid') !== 'due';
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
+      isPaid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+    }`}>
+      {isPaid ? 'Paid' : 'Due'}
+    </span>
+  );
+}
 
-  const handleWhatsApp = (customer) => {
-    const result = sendWhatsApp(customer);
-    if (!result.success) {
-      onNotify(result.error, 'error');
-    } else {
-      onNotify(`Bill sent to ${customer.name} via WhatsApp`, 'success');
-    }
+const formatCurrency = (amount) =>
+  new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+
+export default function CustomerList({ customers, onEdit, onDelete, onNotify, onToggleStatus, onViewProfile }) {
+  const [expandedGroups, setExpandedGroups] = useState({});
+
+  const groups = useMemo(() => groupCustomerEntries(customers), [customers]);
+
+  const toggleGroup = (index) => {
+    setExpandedGroups(prev => ({ ...prev, [index]: !prev[index] }));
   };
 
-  const handlePdf = (customer) => {
-    downloadPdfBill(customer);
-    onNotify(`PDF bill generated for ${customer.name}`, 'success');
+  const handleWhatsApp = (bill) => {
+    const result = sendWhatsApp(bill);
+    if (!result.success) onNotify(result.error, 'error');
+    else onNotify(`Bill sent to ${bill.name} via WhatsApp`, 'success');
   };
 
-  const handleShare = async (customer) => {
-    const result = await shareViaNativeShare(customer);
-    if (result.success) {
-      onNotify(result.fallback ? 'Bill copied to clipboard!' : 'Shared successfully!', 'success');
-    } else {
-      onNotify(result.error, 'error');
-    }
+  const handlePdf = (bill) => {
+    downloadPdfBill(bill);
+    onNotify(`PDF generated for ${bill.name}`, 'success');
+  };
+
+  const handleShare = async (bill) => {
+    const result = await shareViaNativeShare(bill);
+    if (result.success) onNotify(result.fallback ? 'Copied to clipboard!' : 'Shared!', 'success');
+    else onNotify(result.error, 'error');
   };
 
   if (customers.length === 0) {
@@ -51,180 +66,192 @@ export default function CustomerList({ customers, onEdit, onDelete, onNotify }) 
   }
 
   return (
-    <div className="animate-fade-in">
-      {/* Desktop Table */}
-      <div className="hidden md:block overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="text-gray-500 uppercase text-xs tracking-wider">
-              <th className="px-5 py-3.5 font-semibold border-b border-gray-100">Date</th>
-              <th className="px-5 py-3.5 font-semibold border-b border-gray-100">Customer</th>
-              <th className="px-5 py-3.5 font-semibold border-b border-gray-100">Product</th>
-              <th className="px-5 py-3.5 font-semibold border-b border-gray-100 text-right">Amount</th>
-              <th className="px-5 py-3.5 font-semibold border-b border-gray-100 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {customers.map((customer) => (
-              <tr
-                key={customer.id}
-                className="hover:bg-orange-50/40 transition-colors border-b border-gray-50 last:border-b-0"
-              >
-                <td className="px-5 py-4 whitespace-nowrap">
-                  <div className="text-sm font-medium text-gray-700">
-                    {format(new Date(customer.date), 'dd MMM yyyy')}
-                  </div>
-                  <div className="text-xs text-gray-400 mt-0.5">
-                    {format(new Date(customer.date), 'hh:mm a')}
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <div className="font-semibold text-gray-800">{customer.name}</div>
-                  {customer.phone && (
-                    <div className="flex items-center text-xs text-gray-400 mt-1 gap-1">
-                      <Phone size={11} />
-                      {customer.phone}
-                    </div>
-                  )}
-                </td>
-                <td className="px-5 py-4">
-                  <span className="text-sm text-gray-600 bg-gray-100 px-2.5 py-1 rounded-lg">
-                    {customer.product}
-                  </span>
-                </td>
-                <td className="px-5 py-4 text-right">
-                  <span className="font-bold text-gray-800 text-base">
-                    {formatCurrency(customer.amount)}
-                  </span>
-                </td>
-                <td className="px-5 py-4 text-right">
-                  <div className="flex items-center justify-end gap-0.5">
-                    {/* WhatsApp Button */}
-                    <button
-                      onClick={() => handleWhatsApp(customer)}
-                      className="text-green-600 hover:text-green-700 p-2 hover:bg-green-50 rounded-lg transition-colors"
-                      title="Send bill via WhatsApp"
-                    >
-                      <WhatsAppIcon size={16} />
-                    </button>
-                    {/* PDF Button */}
-                    <button
-                      onClick={() => handlePdf(customer)}
-                      className="text-gray-400 hover:text-blue-600 p-2 hover:bg-blue-50 rounded-lg transition-colors"
-                      title="Download PDF Bill"
-                    >
-                      <FileDown size={16} />
-                    </button>
-                    {/* Share Button */}
-                    <button
-                      onClick={() => handleShare(customer)}
-                      className="text-gray-400 hover:text-orange-600 p-2 hover:bg-orange-50 rounded-lg transition-colors"
-                      title="Share via WhatsApp, Telegram, etc."
-                    >
-                      <Share2 size={16} />
-                    </button>
-                    {/* Edit Button */}
-                    <button
-                      onClick={() => onEdit(customer)}
-                      className="text-gray-400 hover:text-orange-600 p-2 hover:bg-orange-50 rounded-lg transition-colors"
-                      title="Edit"
-                    >
-                      <Edit2 size={16} />
-                    </button>
-                    {/* Delete Button */}
-                    <button
-                      onClick={() => {
-                        if (window.confirm(`Delete entry for "${customer.name}"?`)) {
-                          onDelete(customer.id);
-                        }
-                      }}
-                      className="text-gray-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
-                      title="Delete"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div className="space-y-3 animate-fade-in">
+      {groups.map((group, groupIndex) => {
+        const isExpanded = expandedGroups[groupIndex] !== false; // default expanded
+        const productTags = (bill) => {
+          const n = normalizeEntry(bill);
+          return n.items.map(i => i.product);
+        };
 
-      {/* Mobile Card Layout */}
-      <div className="md:hidden space-y-3">
-        {customers.map((customer) => (
-          <div key={customer.id} className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-            <div className="flex justify-between items-start mb-2">
+        return (
+          <div key={`group-${groupIndex}`} className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm">
+            {/* GROUP HEADER */}
+            <div
+              className="flex items-center justify-between p-4 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
+              onClick={() => toggleGroup(groupIndex)}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center flex-shrink-0">
+                  <User size={18} className="text-orange-600" />
+                </div>
+                <div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); if (onViewProfile) onViewProfile(group); }}
+                    className="font-bold text-gray-800 text-sm hover:text-orange-600 transition-colors text-left"
+                  >
+                    {group.customerName}
+                  </button>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {group.customerPhone && (
+                      <span className="text-xs text-gray-400 flex items-center gap-1">
+                        <Phone size={10} /> {group.customerPhone}
+                      </span>
+                    )}
+                    <span className="text-xs text-gray-400">{group.billCount} bill{group.billCount !== 1 ? 's' : ''}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="text-right hidden sm:block">
+                  <p className="font-bold text-gray-800 text-sm">{formatCurrency(group.totalAmount)}</p>
+                  <div className="flex gap-2 text-xs mt-0.5">
+                    {group.totalPaid > 0 && <span className="text-green-600">✅ {formatCurrency(group.totalPaid)}</span>}
+                    {group.totalDue > 0 && <span className="text-red-600">⏳ {formatCurrency(group.totalDue)}</span>}
+                  </div>
+                </div>
+                {isExpanded ? <ChevronUp size={18} className="text-gray-400" /> : <ChevronDown size={18} className="text-gray-400" />}
+              </div>
+            </div>
+
+            {/* Mobile summary (visible on small screens) */}
+            <div className="sm:hidden px-4 py-2 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+              <span className="font-bold text-gray-800 text-sm">{formatCurrency(group.totalAmount)}</span>
+              <div className="flex gap-2 text-xs">
+                {group.totalPaid > 0 && <span className="text-green-600">Paid: {formatCurrency(group.totalPaid)}</span>}
+                {group.totalDue > 0 && <span className="text-red-600">Due: {formatCurrency(group.totalDue)}</span>}
+              </div>
+            </div>
+
+            {/* BILLS LIST */}
+            {isExpanded && (
               <div>
-                <h4 className="font-semibold text-gray-800">{customer.name}</h4>
-                {customer.phone && (
-                  <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
-                    <Phone size={11} /> {customer.phone}
-                  </p>
+                {/* Desktop */}
+                <div className="hidden md:block">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="text-gray-500 uppercase text-xs tracking-wider bg-gray-50/50">
+                        <th className="px-4 py-2 font-semibold">Date</th>
+                        <th className="px-4 py-2 font-semibold">Products</th>
+                        <th className="px-4 py-2 font-semibold text-right">Amount</th>
+                        <th className="px-4 py-2 font-semibold text-center">Status</th>
+                        <th className="px-4 py-2 font-semibold text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.bills.map((bill) => (
+                        <tr key={bill.id} className="hover:bg-orange-50/30 transition-colors border-t border-gray-50">
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-700">{format(new Date(bill.date), 'dd MMM yyyy')}</div>
+                            <div className="text-xs text-gray-400">{format(new Date(bill.date), 'hh:mm a')}</div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-1">
+                              {productTags(bill).map((tag, ti) => (
+                                <span key={ti} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md">{tag}</span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="font-bold text-gray-800">{formatCurrency(bill.amount)}</span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <StatusBadge status={bill.status} />
+                              <button
+                                onClick={() => onToggleStatus(bill.id, bill.status === 'due' ? 'paid' : 'due')}
+                                className={`text-xs font-medium px-2 py-0.5 rounded-md transition-colors ${
+                                  bill.status === 'due'
+                                    ? 'text-green-600 hover:bg-green-50'
+                                    : 'text-gray-400 hover:bg-gray-100'
+                                }`}
+                              >
+                                {bill.status === 'due' ? 'Mark Paid' : 'Mark Due'}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-0.5">
+                              <button onClick={() => handleWhatsApp(bill)} className="text-green-600 hover:text-green-700 p-1.5 hover:bg-green-50 rounded-lg transition-colors" title="WhatsApp">
+                                <WhatsAppIcon size={14} />
+                              </button>
+                              <button onClick={() => handlePdf(bill)} className="text-gray-400 hover:text-blue-600 p-1.5 hover:bg-blue-50 rounded-lg transition-colors" title="PDF">
+                                <FileDown size={14} />
+                              </button>
+                              <button onClick={() => handleShare(bill)} className="text-gray-400 hover:text-orange-600 p-1.5 hover:bg-orange-50 rounded-lg transition-colors" title="Share">
+                                <Share2 size={14} />
+                              </button>
+                              <button onClick={() => onEdit(bill)} className="text-gray-400 hover:text-orange-600 p-1.5 hover:bg-orange-50 rounded-lg transition-colors" title="Edit">
+                                <Edit2 size={14} />
+                              </button>
+                              <button onClick={() => { if (window.confirm(`Delete this entry?`)) onDelete(bill.id); }}
+                                className="text-gray-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg transition-colors" title="Delete">
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile */}
+                <div className="md:hidden space-y-2 p-3">
+                  {group.bills.map((bill) => (
+                    <div key={bill.id} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <div className="flex flex-wrap gap-1 mb-1">
+                            {productTags(bill).map((tag, ti) => (
+                              <span key={ti} className="text-xs bg-white text-gray-600 px-2 py-0.5 rounded-md border border-gray-100">{tag}</span>
+                            ))}
+                          </div>
+                          <span className="text-xs text-gray-400">{format(new Date(bill.date), 'dd MMM yyyy')}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <StatusBadge status={bill.status} />
+                          <span className="font-bold text-orange-600">{formatCurrency(bill.amount)}</span>
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+                        <button
+                          onClick={() => onToggleStatus(bill.id, bill.status === 'due' ? 'paid' : 'due')}
+                          className={`text-xs font-semibold px-3 py-1 rounded-lg transition-colors ${
+                            bill.status === 'due'
+                              ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                              : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                          }`}
+                        >
+                          {bill.status === 'due' ? '✅ Mark Paid' : 'Mark Due'}
+                        </button>
+                        <div className="flex items-center gap-0.5">
+                          <button onClick={() => handleWhatsApp(bill)} className="text-green-600 p-1.5 hover:bg-white rounded-lg"><WhatsAppIcon size={14} /></button>
+                          <button onClick={() => handlePdf(bill)} className="text-gray-400 p-1.5 hover:bg-white rounded-lg"><FileDown size={14} /></button>
+                          <button onClick={() => onEdit(bill)} className="text-gray-400 p-1.5 hover:bg-white rounded-lg"><Edit2 size={14} /></button>
+                          <button onClick={() => { if (window.confirm(`Delete?`)) onDelete(bill.id); }} className="text-gray-400 p-1.5 hover:bg-white rounded-lg"><Trash2 size={14} /></button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* GROUP SUMMARY */}
+                {group.billCount > 1 && (
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border-t border-gray-100 text-xs font-semibold">
+                    <span className="text-gray-500">Total: {formatCurrency(group.totalAmount)}</span>
+                    <div className="flex gap-3">
+                      <span className="text-green-600">Paid: {formatCurrency(group.totalPaid)}</span>
+                      <span className="text-red-600">Due: {formatCurrency(group.totalDue)}</span>
+                    </div>
+                  </div>
                 )}
               </div>
-              <span className="text-lg font-bold text-orange-600">
-                {formatCurrency(customer.amount)}
-              </span>
-            </div>
-            <div className="flex justify-between items-center mt-3 pt-3 border-t border-gray-200">
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-gray-500 bg-white px-2 py-1 rounded-md">
-                  {customer.product}
-                </span>
-                <span className="text-xs text-gray-400">
-                  {format(new Date(customer.date), 'dd MMM')}
-                </span>
-              </div>
-              <div className="flex items-center gap-0.5">
-                {/* WhatsApp */}
-                <button
-                  onClick={() => handleWhatsApp(customer)}
-                  className="text-green-600 hover:text-green-700 p-2 hover:bg-white rounded-lg transition-colors"
-                  title="WhatsApp"
-                >
-                  <WhatsAppIcon size={16} />
-                </button>
-                {/* PDF */}
-                <button
-                  onClick={() => handlePdf(customer)}
-                  className="text-gray-400 hover:text-blue-600 p-2 hover:bg-white rounded-lg transition-colors"
-                  title="PDF"
-                >
-                  <FileDown size={15} />
-                </button>
-                {/* Share */}
-                <button
-                  onClick={() => handleShare(customer)}
-                  className="text-gray-400 hover:text-orange-600 p-2 hover:bg-white rounded-lg transition-colors"
-                  title="Share"
-                >
-                  <Share2 size={15} />
-                </button>
-                {/* Edit */}
-                <button
-                  onClick={() => onEdit(customer)}
-                  className="text-gray-400 hover:text-orange-600 p-2 hover:bg-white rounded-lg transition-colors"
-                >
-                  <Edit2 size={16} />
-                </button>
-                {/* Delete */}
-                <button
-                  onClick={() => {
-                    if (window.confirm(`Delete entry for "${customer.name}"?`)) {
-                      onDelete(customer.id);
-                    }
-                  }}
-                  className="text-gray-400 hover:text-red-600 p-2 hover:bg-white rounded-lg transition-colors"
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            </div>
+            )}
           </div>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }

@@ -13,6 +13,18 @@ const SHOP = {
 export function generateBillText(customer) {
   const dateStr = format(new Date(customer.date), 'dd MMM yyyy');
   const amount = new Intl.NumberFormat('en-IN').format(customer.amount);
+  const status = (customer.status || 'paid') === 'paid' ? '✅ Paid' : '⏳ Due';
+
+  // Multi-product support
+  let productLines = '';
+  if (customer.items && customer.items.length > 0) {
+    productLines = customer.items.map(item =>
+      `  • ${item.product} × ${item.quantity || 1} = ₹${new Intl.NumberFormat('en-IN').format(item.lineTotal || 0)}`
+    ).join('\n');
+  } else {
+    const qty = customer.quantity || 1;
+    productLines = `  • ${customer.product} × ${qty} = ₹${amount}`;
+  }
 
   return `Namaste ${customer.name},
 
@@ -20,10 +32,11 @@ Thank you for your purchase from *${SHOP.name}*.
 
 🧾 *Bill Details*
 ━━━━━━━━━━━━━━━
-Product: ${customer.product}
-Amount: ₹${amount}
-Date: ${dateStr}
+${productLines}
 ━━━━━━━━━━━━━━━
+*Total: ₹${amount}*
+Status: ${status}
+Date: ${dateStr}
 
 For any queries contact: ${SHOP.phone}
 
@@ -53,15 +66,28 @@ export function sendWhatsApp(customer) {
 
 /**
  * Generate and download a PDF bill using a print-friendly HTML popup
- * Includes the NatvarNand logo
  */
 export function downloadPdfBill(customer) {
   const dateStr = format(new Date(customer.date), 'dd MMM yyyy');
   const timeStr = format(new Date(customer.date), 'hh:mm a');
   const amount = new Intl.NumberFormat('en-IN').format(customer.amount);
-
-  // Use logo from public folder — construct absolute URL
+  const status = (customer.status || 'paid') === 'paid' ? 'Paid' : 'Due';
+  const statusColor = status === 'Paid' ? '#16a34a' : '#dc2626';
   const logoUrl = window.location.origin + '/logo.png';
+
+  // Multi-product lines
+  let itemsHtml = '';
+  if (customer.items && customer.items.length > 0) {
+    itemsHtml = customer.items.map(item => `
+      <tr>
+        <td class="label">${item.product}</td>
+        <td class="value">${item.quantity || 1} × ₹${new Intl.NumberFormat('en-IN').format(item.pricePerUnit || 0)} = ₹${new Intl.NumberFormat('en-IN').format(item.lineTotal || 0)}</td>
+      </tr>
+    `).join('');
+  } else {
+    const qty = customer.quantity || 1;
+    itemsHtml = `<tr><td class="label">Product</td><td class="value">${customer.product} (×${qty})</td></tr>`;
+  }
 
   const html = `
 <!DOCTYPE html>
@@ -97,9 +123,7 @@ export function downloadPdfBill(customer) {
       color: #1f2937;
       letter-spacing: -0.5px;
     }
-    .shop-name span {
-      color: #ea580c;
-    }
+    .shop-name span { color: #ea580c; }
     .shop-tagline {
       font-size: 11px;
       color: #6b7280;
@@ -126,29 +150,20 @@ export function downloadPdfBill(customer) {
       border-collapse: collapse;
       margin-bottom: 28px;
     }
-    .details-table tr {
-      border-bottom: 1px solid #f3f4f6;
-    }
-    .details-table td {
-      padding: 14px 0;
-      font-size: 14px;
-    }
-    .details-table .label {
-      color: #6b7280;
+    .details-table tr { border-bottom: 1px solid #f3f4f6; }
+    .details-table td { padding: 14px 0; font-size: 14px; }
+    .details-table .label { color: #6b7280; font-weight: 600; width: 140px; }
+    .details-table .value { color: #111827; font-weight: 500; }
+    .amount-row { border-bottom: 2px solid #ea580c !important; }
+    .amount-row .value { font-size: 24px; font-weight: 800; color: #ea580c; }
+    .status-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 13px;
       font-weight: 600;
-      width: 140px;
-    }
-    .details-table .value {
-      color: #111827;
-      font-weight: 500;
-    }
-    .amount-row {
-      border-bottom: 2px solid #ea580c !important;
-    }
-    .amount-row .value {
-      font-size: 24px;
-      font-weight: 800;
-      color: #ea580c;
+      color: white;
+      background: ${statusColor};
     }
     .footer {
       margin-top: 32px;
@@ -156,17 +171,8 @@ export function downloadPdfBill(customer) {
       border-top: 2px dashed #e5e7eb;
       text-align: center;
     }
-    .footer p {
-      font-size: 12px;
-      color: #9ca3af;
-      margin-top: 4px;
-    }
-    .footer .owner {
-      font-size: 15px;
-      font-weight: 600;
-      color: #374151;
-      margin-top: 12px;
-    }
+    .footer p { font-size: 12px; color: #9ca3af; margin-top: 4px; }
+    .footer .owner { font-size: 15px; font-weight: 600; color: #374151; margin-top: 12px; }
     .thank-you {
       text-align: center;
       font-size: 14px;
@@ -177,6 +183,7 @@ export function downloadPdfBill(customer) {
       background: #fef3c7;
       border-radius: 10px;
     }
+    .items-header { font-size: 12px; color: #6b7280; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; padding: 10px 0 6px; border-bottom: 2px solid #e5e7eb; }
     @media print {
       body { padding: 20px; }
       @page { margin: 15mm; }
@@ -198,20 +205,19 @@ export function downloadPdfBill(customer) {
       <td class="label">Customer</td>
       <td class="value">${customer.name}</td>
     </tr>
-    ${customer.phone ? `<tr>
-      <td class="label">Phone</td>
-      <td class="value">${customer.phone}</td>
-    </tr>` : ''}
-    <tr>
-      <td class="label">Product</td>
-      <td class="value">${customer.product}</td>
-    </tr>
+    ${customer.phone ? `<tr><td class="label">Phone</td><td class="value">${customer.phone}</td></tr>` : ''}
     <tr>
       <td class="label">Date</td>
       <td class="value">${dateStr} at ${timeStr}</td>
     </tr>
+    <tr>
+      <td class="label">Status</td>
+      <td class="value"><span class="status-badge">${status}</span></td>
+    </tr>
+    <tr><td colspan="2" class="items-header">Items</td></tr>
+    ${itemsHtml}
     <tr class="amount-row">
-      <td class="label">Amount</td>
+      <td class="label">Total Amount</td>
       <td class="value">₹${amount}</td>
     </tr>
   </table>
@@ -230,15 +236,12 @@ export function downloadPdfBill(customer) {
   if (printWindow) {
     printWindow.document.write(html);
     printWindow.document.close();
-    setTimeout(() => {
-      printWindow.print();
-    }, 500);
+    setTimeout(() => { printWindow.print(); }, 500);
   }
 }
 
 /**
- * Share sale details using Web Share API (WhatsApp, Telegram, etc.)
- * Falls back to clipboard copy if not supported.
+ * Share sale details using Web Share API
  */
 export async function shareViaNativeShare(customer) {
   const text = generateBillText(customer);
@@ -257,7 +260,6 @@ export async function shareViaNativeShare(customer) {
       return { success: false, error: 'Failed to share' };
     }
   } else {
-    // Fallback: copy to clipboard
     try {
       await navigator.clipboard.writeText(text);
       return { success: true, fallback: true };
